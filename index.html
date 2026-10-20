@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Latih CPR</title>
+<meta name="theme-color" content="#0b1215">
+<meta name="description" content="Latihan kompresi dada CPR menggunakan kamera telefon. AI berjalan dalam telefon.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+/* Layout: aplikasi satu skrin, gelap (paparan kamera), tiga keadaan: persediaan → latihan → keputusan */
+:root{
+  --bg:#0b1215; --panel:#121c20; --panel-2:#1a272c; --line:#26363c;
+  --fg:#e8f0f1; --muted:#8fa3a8;
+  --accent:#4cc9c0;               /* teal klinikal */
+  --ok:#47d18c; --warn:#ffb547; --bad:#ff6b6b;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;
+  --num:ui-monospace,"SF Mono","Roboto Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer}
+[hidden]{display:none!important}
+.screen{min-height:100%;padding-block:max(20px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-bottom));
+  padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font-size:30px;line-height:1.15;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 8px;font-weight:600}
+p{margin:0}
+.lede{color:var(--muted);max-width:60ch}
+.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+ol.steps{margin:0;padding-left:20px;display:grid;gap:6px}
+ol.steps li::marker{color:var(--accent);font-weight:700}
+.targets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.targets div{background:var(--panel-2);border-radius:10px;padding:10px 4px}
+.targets b{display:block;font:600 17px var(--num);font-variant-numeric:tabular-nums}
+.targets span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.settings{display:grid;gap:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.row label{color:var(--fg)}
+.row small{display:block;color:var(--muted);font-size:12px}
+.seg{display:inline-flex;background:var(--panel-2);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;padding:8px 12px;border-radius:8px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#06201e;font-weight:600}
+input[type=number]{width:84px;background:var(--panel-2);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:8px;font:600 15px var(--num);text-align:right}
+.switch{appearance:none;width:46px;height:28px;border-radius:14px;background:var(--line);position:relative;transition:background .2s;flex:none}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--fg);transition:transform .2s}
+.switch:checked{background:var(--accent)}
+.switch:checked::after{transform:translateX(18px)}
+.btn{border:0;border-radius:12px;padding:15px 18px;font-weight:700;font-size:16px}
+.btn-primary{background:var(--accent);color:#06201e;width:100%}
+.btn-ghost{background:var(--panel-2);border:1px solid var(--line)}
+.btn:focus-visible,.seg button:focus-visible,.switch:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.note{font-size:12px;color:var(--muted)}
+.err{color:var(--bad)}
+
+/* ---------- Latihan ---------- */
+#train{position:fixed;inset:0;background:#000;overflow:hidden}
+#train video,#train canvas.overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#train.mirror video,#train.mirror canvas.overlay{transform:scaleX(-1)}
+.hud{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none;
+  padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
+.hud > *{pointer-events:auto}
+.stats{display:grid;grid-template-columns:repeat(4,1fr) auto;gap:6px}
+.stat{background:rgba(11,18,21,.78);backdrop-filter:blur(6px);border-radius:12px;padding:8px 10px;border-top:3px solid var(--line);min-width:0}
+.stat span{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stat b{font:700 24px/1.1 var(--num);font-variant-numeric:tabular-nums}
+.stat small{font-size:11px;color:var(--muted);margin-left:2px}
+.stat[data-s="ok"]{border-top-color:var(--ok)} .stat[data-s="ok"] b{color:var(--ok)}
+.stat[data-s="warn"]{border-top-color:var(--warn)} .stat[data-s="warn"] b{color:var(--warn)}
+.cycle{background:rgba(11,18,21,.78);border-radius:12px;padding:6px 12px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+.cycle b{font:800 30px/1 var(--num);font-variant-numeric:tabular-nums}
+.cycle span{font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.cycle.full{background:var(--warn);color:#2a1a00}.cycle.full span{color:#2a1a00}
+.bottom{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.feedback{align-self:center;max-width:100%;padding:12px 22px;border-radius:999px;font-weight:800;font-size:clamp(18px,4.4vw,28px);
+  background:rgba(11,18,21,.85);border:2px solid var(--line);text-align:center;transition:border-color .2s,background .2s}
+.feedback[data-k="good"]{border-color:var(--ok);color:var(--ok)}
+.feedback[data-k="warn"]{border-color:var(--warn);color:var(--warn)}
+.feedback[data-k="breath"]{background:var(--warn);color:#2a1a00;border-color:var(--warn)}
+.feedback[data-k="info"]{color:var(--fg)}
+.controls{display:flex;gap:8px;align-items:center}
+.controls .btn{padding:11px 14px;font-size:14px;background:rgba(18,28,32,.85);border:1px solid var(--line)}
+.controls .btn[aria-pressed="false"]{color:var(--muted);text-decoration:line-through}
+.controls .end{margin-left:auto;background:var(--bad);border-color:var(--bad);color:#2b0505}
+.beat{width:14px;height:14px;border-radius:50%;background:var(--line);flex:none;transition:background .05s}
+.beat.on{background:var(--accent)}
+canvas.trace{width:120px;height:36px;background:rgba(11,18,21,.78);border-radius:8px;flex:none}
+@media (max-width:520px){.stat b{font-size:19px}.stat{padding:6px 7px}.cycle b{font-size:22px}canvas.trace{display:none}}
+
+/* ---------- Keputusan ---------- */
+.score{display:flex;align-items:center;gap:18px}
+.score-num{font:800 64px/1 var(--num);font-variant-numeric:tabular-nums}
+.score-num small{font-size:20px;color:var(--muted)}
+.grade{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:700;font-size:13px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+td,th{padding:9px 4px;border-bottom:1px solid var(--line);text-align:left}
+th{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+td:last-child,th:last-child{text-align:right}
+.pill{font:600 12px var(--font);padding:2px 8px;border-radius:999px}
+.pill.ok{background:rgba(71,209,140,.15);color:var(--ok)}
+.pill.warn{background:rgba(255,181,71,.15);color:var(--warn)}
+ul.list{margin:0;padding-left:18px;display:grid;gap:6px}
+.good li::marker{color:var(--ok)} .fix li::marker{color:var(--warn)}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hist td{font-size:13px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ Persediaan ============ -->
+<section id="setup" class="screen">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Latihan kompresi dada</div>
+      <h1>Latih CPR</h1>
+      <p class="lede">Kamera telefon menilai kadar, kedalaman, recoil dan postur siku anda pada manikin. AI pose berjalan dalam telefon; video tidak dihantar ke mana-mana.</p>
+    </div>
+
+    <div class="card">
+      <h2>Sasaran dewasa (AHA/ERC)</h2>
+      <div class="targets">
+        <div><b>100–120</b><span>per min</span></div>
+        <div><b>5–6</b><span>cm</span></div>
+        <div><b>Penuh</b><span>recoil</span></div>
+        <div><b>30:2</b><span>kitaran</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Susun telefon</h2>
+      <ol class="steps">
+        <li>Sandar telefon <b>di sisi</b> manikin, 1.5–2.5 m, mendatar (landskap).</li>
+        <li>Pastikan kepala, tangan dan pinggul anda kelihatan dalam skrin.</li>
+        <li>Letak tangan di dada manikin <b>tanpa menekan</b> 2 saat, kemudian mula.</li>
+      </ol>
+    </div>
+
+    <div class="card settings">
+      <h2>Tetapan</h2>
+      <div class="row">
+        <label>Kamera</label>
+        <div class="seg" role="group" aria-label="Pilih kamera">
+          <button type="button" id="cam-back" aria-pressed="true">Belakang</button>
+          <button type="button" id="cam-front" aria-pressed="false">Depan</button>
+        </div>
+      </div>
+      <div class="row">
+        <label for="torso">Panjang bahu → pinggul<small>Untuk anggaran kedalaman (cm)</small></label>
+        <input id="torso" type="number" min="35" max="70" step="1" value="50" inputmode="numeric">
+      </div>
+      <div class="row">
+        <label for="voice">Arahan suara</label>
+        <input id="voice" class="switch" type="checkbox" checked>
+      </div>
+      <div class="row">
+        <label for="metro">Metronom 110/min</label>
+        <input id="metro" class="switch" type="checkbox" checked>
+      </div>
+    </div>
+
+    <button id="start" class="btn btn-primary" type="button">Mula latihan</button>
+    <p id="setup-msg" class="note" role="status"></p>
+    <p class="note">Alat bantu latihan sahaja, bukan pengganti kursus BLS bertauliah. Kedalaman ialah anggaran daripada kamera 2D.</p>
+  </div>
+</section>
+
+<!-- ============ Latihan ============ -->
+<section id="train" hidden>
+  <video id="video" playsinline muted></video>
+  <canvas id="overlay" class="overlay"></canvas>
+  <div class="hud">
+    <div class="stats">
+      <div class="stat" id="s-rate"><span>Kadar</span><b>–</b><small>/min</small></div>
+      <div class="stat" id="s-depth"><span>Dalam</span><b>–</b><small>cm</small></div>
+      <div class="stat" id="s-recoil"><span>Recoil</span><b>–</b><small>%</small></div>
+      <div class="stat" id="s-elbow"><span>Siku</span><b>–</b><small>°</small></div>
+      <div class="cycle" id="cycle"><b id="cycle-n">0</b><span>/ 30</span></div>
+    </div>
+    <div class="bottom">
+      <div class="feedback" id="feedback" data-k="info" role="status" aria-live="polite">Memuatkan AI…</div>
+      <div class="controls">
+        <span class="beat" id="beat" aria-hidden="true"></span>
+        <button class="btn" id="t-metro" type="button" aria-pressed="true">Metronom</button>
+        <button class="btn" id="t-voice" type="button" aria-pressed="true">Suara</button>
+        <canvas class="trace" id="trace" width="240" height="72" aria-hidden="true"></canvas>
+        <button class="btn end" id="stop" type="button">Tamat</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Keputusan ============ -->
+<section id="result" class="screen" hidden>
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Keputusan sesi</div>
+      <div class="score">
+        <div class="score-num" id="r-score">0<small>/100</small></div>
+        <div><span class="grade" id="r-grade"></span><p class="note" id="r-meta"></p></div>
+      </div>
+    </div>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Ukuran</th><th>Hasil</th><th>Dalam julat</th></tr></thead>
+        <tbody id="r-table"></tbody>
+      </table>
+    </div>
+    <div class="card good"><h2>Yang baik</h2><ul class="list" id="r-good"></ul></div>
+    <div class="card fix"><h2>Perlu diperbaiki</h2><ul class="list" id="r-fix"></ul></div>
+    <div class="card"><h2>Sasaran seterusnya</h2><p id="r-target"></p></div>
+    <div class="actions">
+      <button class="btn btn-ghost" id="share" type="button">Kongsi keputusan</button>
+      <button class="btn btn-primary" id="again" type="button">Latih lagi</button>
+    </div>
+    <p id="share-msg" class="note" role="status"></p>
+    <div class="card hist" id="hist-card" hidden>
+      <h2>Sesi terdahulu (telefon ini)</h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>Tarikh</th><th>Kompresi</th><th>Skor</th></tr></thead><tbody id="r-hist"></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<script src="cpr-core.js"></script>
+<script type="module">
+const { T, jointAngle, CompressionDetector, Session, liveFeedback, coachReport } = window.CPR;
+const MP_VER = "0.10.14";
+const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+// Indeks landmark MediaPipe Pose
+const L = { ls: 11, rs: 12, le: 13, re: 14, lw: 15, rw: 16, lh: 23, rh: 24 };
+const VIS = 0.5;
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+/* ---------- Tetapan ---------- */
+const prefs = Object.assign({ facing: "environment", torso: 50, voice: true, metro: true }, store.get("cpr.prefs", {}));
+function paintPrefs() {
+  $("cam-back").setAttribute("aria-pressed", prefs.facing === "environment");
+  $("cam-front").setAttribute("aria-pressed", prefs.facing === "user");
+  $("torso").value = prefs.torso; $("voice").checked = prefs.voice; $("metro").checked = prefs.metro;
+}
+paintPrefs();
+$("cam-back").onclick = () => { prefs.facing = "environment"; paintPrefs(); };
+$("cam-front").onclick = () => { prefs.facing = "user"; paintPrefs(); };
+$("voice").onchange = (e) => prefs.voice = e.target.checked;
+$("metro").onchange = (e) => prefs.metro = e.target.checked;
+$("torso").onchange = (e) => prefs.torso = Math.min(70, Math.max(35, +e.target.value || 50));
+
+/* ---------- AI pose (MediaPipe, dalam telefon) ---------- */
+let landmarker = null;
+async function loadModel() {
+  if (landmarker) return landmarker;
+  const { FilesetResolver, PoseLandmarker } = await import(`${MP_BASE}/vision_bundle.mjs`);
+  const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+  const opts = (delegate) => ({ baseOptions: { modelAssetPath: MODEL_URL, delegate }, runningMode: "VIDEO", numPoses: 1,
+    minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
+  try { landmarker = await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
+  catch { landmarker = await PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+  return landmarker;
+}
+
+/* ---------- Bunyi: metronom & suara ---------- */
+let audio = null, metroTimer = null, nextBeat = 0;
+function startMetronome() {
+  if (!audio) return;
+  const period = 60 / T.BPM;
+  nextBeat = audio.currentTime + 0.1;
+  clearInterval(metroTimer);
+  metroTimer = setInterval(() => {
+    while (nextBeat < audio.currentTime + 0.15) {
+      if (prefs.metro) {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.frequency.value = 1050; o.connect(g); g.connect(audio.destination);
+        g.gain.setValueAtTime(0.0001, nextBeat);
+        g.gain.exponentialRampToValueAtTime(0.35, nextBeat + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001, nextBeat + 0.06);
+        o.start(nextBeat); o.stop(nextBeat + 0.07);
+      }
+      nextBeat += period;
+    }
+  }, 40);
+}
+let voice = null;
+function pickVoice() {
+  const vs = speechSynthesis?.getVoices?.() || [];
+  voice = vs.find(v => /^ms/i.test(v.lang)) || vs.find(v => /^id/i.test(v.lang)) || null;
+}
+if ("speechSynthesis" in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+let lastSaid = { k: null, t: -99 };
+function say(text, k, now, force = false) {
+  if (!prefs.voice || !("speechSynthesis" in window)) return;
+  const gap = now - lastSaid.t;
+  if (!force && (gap < 4 || (k === lastSaid.k && gap < 8) || (k === "good" && gap < 15))) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = voice?.lang || "ms-MY"; if (voice) u.voice = voice; u.rate = 1.05;
+  speechSynthesis.speak(u);
+  lastSaid = { k, t: now };
+}
+
+/* ---------- Kamera ---------- */
+let stream = null, wakeLock = null;
+async function openCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+    video: { facingMode: { ideal: prefs.facing }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  const v = $("video"); v.srcObject = stream; await v.play();
+  $("train").classList.toggle("mirror", prefs.facing === "user");
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+}
+function closeCamera() {
+  stream?.getTracks().forEach(t => t.stop()); stream = null;
+  try { wakeLock?.release(); } catch {} wakeLock = null;
+}
+
+/* ---------- Sesi latihan ---------- */
+let det, sess, last, torsoHist, trace, running = false, t0 = 0, lastVideoTime = -1, cycleAnnounced = false;
+const ctx = $("overlay").getContext("2d"), tctx = $("trace").getContext("2d");
+
+function setStat(id, value, ok, digits = 0) {
+  const el = $(id); el.querySelector("b").textContent = value == null ? "–" : value.toFixed(digits);
+  el.dataset.s = value == null ? "" : ok ? "ok" : "warn";
+}
+function setFeedback(text, k) { const f = $("feedback"); if (f.textContent !== text) f.textContent = text; f.dataset.k = k; }
+
+function drawPose(lm, W, H) {
+  const c = $("overlay");
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  ctx.clearRect(0, 0, W, H);
+  if (!lm) return;
+  const P = (i) => ({ x: lm[i].x * W, y: lm[i].y * H, v: lm[i].visibility ?? 1 });
+  const lw = Math.max(3, W / 220);
+  const seg = [[L.ls, L.rs], [L.ls, L.le], [L.le, L.lw], [L.rs, L.re], [L.re, L.rw], [L.ls, L.lh], [L.rs, L.rh], [L.lh, L.rh]];
+  ctx.lineCap = "round";
+  for (const [a, b] of seg) {
+    const A = P(a), B = P(b); if (A.v < VIS || B.v < VIS) continue;
+    ctx.strokeStyle = (a === L.le || a === L.re || b === L.le || b === L.re) ? "#4cc9c0" : "rgba(232,240,241,.75)";
+    ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke();
+  }
+  for (const i of [L.lw, L.rw]) { const p = P(i); if (p.v < VIS) continue;
+    ctx.fillStyle = "#ffb547"; ctx.beginPath(); ctx.arc(p.x, p.y, lw * 2.4, 0, Math.PI * 2); ctx.fill(); }
+}
+function drawTrace() {
+  const W = 240, H = 72; tctx.clearRect(0, 0, W, H);
+  if (trace.length < 3) return;
+  let lo = Math.min(...trace), hi = Math.max(...trace); const r = Math.max(hi - lo, 1);
+  tctx.strokeStyle = "#4cc9c0"; tctx.lineWidth = 3; tctx.beginPath();
+  trace.forEach((v, i) => { const x = i * W / (trace.length - 1), y = 6 + (v - lo) / r * (H - 12); i ? tctx.lineTo(x, y) : tctx.moveTo(x, y); });
+  tctx.stroke();
+}
+
+function avgPoint(lm, idx, W, H) {
+  const pts = idx.map(i => lm[i]).filter(p => (p.visibility ?? 1) >= VIS);
+  if (!pts.length) return null;
+  return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length * W, y: pts.reduce((s, p) => s + p.y, 0) / pts.length * H };
+}
+
+function frame() {
+  if (!running) return;
+  const v = $("video");
+  if (v.readyState >= 2 && v.currentTime !== lastVideoTime) {
+    lastVideoTime = v.currentTime;
+    const now = performance.now() / 1000 - t0;
+    const W = v.videoWidth, H = v.videoHeight;
+    let res; try { res = landmarker.detectForVideo(v, performance.now()); } catch { res = null; }
+    const lm = res?.landmarks?.[0];
+    drawPose(lm, W, H);
+    let alert = null;
+
+    if (!lm) alert = "Tiada orang dikesan. Pastikan seluruh badan dalam skrin";
+    else {
+      const wrist = avgPoint(lm, [L.lw, L.rw], W, H), sh = avgPoint(lm, [L.ls, L.rs], W, H), hip = avgPoint(lm, [L.lh, L.rh], W, H);
+      if (sh && hip) { torsoHist.push(Math.hypot(sh.x - hip.x, sh.y - hip.y)); if (torsoHist.length > 90) torsoHist.shift(); }
+      const angles = [];
+      for (const [s, e, w] of [[L.ls, L.le, L.lw], [L.rs, L.re, L.rw]]) {
+        if ([s, e, w].every(i => (lm[i].visibility ?? 1) >= VIS)) {
+          const a = jointAngle({ x: lm[s].x * W, y: lm[s].y * H }, { x: lm[e].x * W, y: lm[e].y * H }, { x: lm[w].x * W, y: lm[w].y * H });
+          if (a != null) angles.push(a);
+        }
+      }
+      const elbow = angles.length ? angles.reduce((a, b) => a + b) / angles.length : null;
+      if (elbow != null) last.elbow = elbow;
+
+      if (!wrist || !torsoHist.length) alert = "Tangan atau badan tidak jelas. Ubah kedudukan telefon";
+      else {
+        const sorted = [...torsoHist].sort((a, b) => a - b), torsoPx = sorted[sorted.length >> 1];
+        const cmPerPx = prefs.torso / Math.max(torsoPx, 1), thr = Math.max(3, 0.025 * torsoPx);
+        trace.push(wrist.y); if (trace.length > 150) trace.shift();
+        for (const [k, e] of det.update(now, wrist.y, thr)) {
+          if (k === "compression") { last.depth = e.depthPx * cmPerPx; sess.addCompression(e.t, last.depth, det.rate(e.t), elbow); }
+          else { last.recoil = e.ratio; sess.addRecoil(e.ratio); }
+        }
+      }
+    }
+
+    sess.checkPause(now);
+    const rate = det.rate(now);
+    setStat("s-rate", rate > 0 ? rate : null, rate >= T.RATE_MIN && rate <= T.RATE_MAX);
+    setStat("s-depth", last.depth, last.depth >= T.DEPTH_MIN && last.depth <= T.DEPTH_MAX, 1);
+    setStat("s-recoil", last.recoil == null ? null : Math.min(last.recoil, 1.2) * 100, last.recoil >= T.RECOIL_MIN);
+    setStat("s-elbow", last.elbow, last.elbow >= T.ELBOW_MIN);
+    $("cycle-n").textContent = sess.cycleCount;
+    $("cycle").classList.toggle("full", sess.cycleCount >= T.CYCLE);
+    drawTrace();
+
+    if (sess.cycleCount >= T.CYCLE) {
+      setFeedback("30 kompresi. Beri 2 bantuan pernafasan", "breath");
+      if (!cycleAnnounced) { say("Tiga puluh. Beri dua bantuan pernafasan.", "breath", now, true); cycleAnnounced = true; }
+    } else {
+      if (sess.cycleCount === 0) cycleAnnounced = false;
+      if (alert) setFeedback(alert, "info");
+      else {
+        const m = liveFeedback({ rate, depth: last.depth, recoil: last.recoil, elbow: last.elbow });
+        if (!m.length) setFeedback(sess.records.length ? "Sambung kompresi" : "Sedia. Mula menekan bila sedia", "info");
+        else { setFeedback(m[0].text, m[0].k === "good" ? "good" : "warn"); say(m[0].text, m[0].k, now); }
+      }
+    }
+  }
+  // Rentak metronom visual
+  if (audio) {
+    const period = 60 / T.BPM, since = (period - ((nextBeat - audio.currentTime) % period) + period) % period;
+    $("beat").classList.toggle("on", prefs.metro && since < 0.12);
+  }
+  requestAnimationFrame(frame);
+}
+
+async function start() {
+  const msg = $("setup-msg"); msg.className = "note"; msg.textContent = "Membuka kamera…";
+  store.set("cpr.prefs", prefs);
+  if (!navigator.mediaDevices?.getUserMedia) { msg.className = "note err"; msg.textContent = "Browser ini tidak menyokong kamera. Guna Chrome (Android) atau Safari (iPhone) melalui pautan https."; return; }
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch { audio = null; }
+  if ("speechSynthesis" in window && prefs.voice) { const u = new SpeechSynthesisUtterance(" "); speechSynthesis.speak(u); }
+  try { await openCamera(); }
+  catch (e) { msg.className = "note err"; msg.textContent = "Kamera tidak dapat dibuka. Benarkan akses kamera untuk laman ini dalam tetapan browser, kemudian cuba lagi."; return; }
+
+  $("setup").hidden = true; $("train").hidden = false;
+  setFeedback("Memuatkan AI pose…", "info");
+  try { await loadModel(); }
+  catch (e) { closeCamera(); $("train").hidden = true; $("setup").hidden = false;
+    msg.className = "note err"; msg.textContent = "Model AI gagal dimuatkan. Sambung ke internet untuk muat turun kali pertama, kemudian cuba lagi."; return; }
+
+  det = new CompressionDetector(); sess = new Session();
+  last = { depth: null, recoil: null, elbow: null }; torsoHist = []; trace = []; cycleAnnounced = false;
+  $("t-metro").setAttribute("aria-pressed", prefs.metro); $("t-voice").setAttribute("aria-pressed", prefs.voice);
+  t0 = performance.now() / 1000; lastVideoTime = -1; running = true;
+  startMetronome();
+  setFeedback("Letak tangan di dada, kemudian mula", "info");
+  requestAnimationFrame(frame);
+}
+
+function stop() {
+  running = false; clearInterval(metroTimer); closeCamera();
+  try { speechSynthesis.cancel(); } catch {}
+  const s = sess?.summary(performance.now() / 1000 - t0);
+  $("train").hidden = true;
+  if (!s) { $("setup").hidden = false; $("setup-msg").textContent = "Tiada kompresi direkod dalam sesi tadi."; return; }
+  const hist = store.get("cpr.history", []); hist.unshift({ date: s.date, n: s.n, score: s.score }); store.set("cpr.history", hist.slice(0, 20));
+  showResult(s, hist.slice(1, 11));
+}
+
+/* ---------- Keputusan ---------- */
+let lastSummary = null;
+function showResult(s, hist) {
+  lastSummary = s;
+  const score = s.score ?? 0;
+  $("r-score").innerHTML = `${Math.round(score)}<small>/100</small>`;
+  const g = $("r-grade");
+  const [txt, col] = score >= 85 ? ["Cemerlang", "var(--ok)"] : score >= 70 ? ["Baik", "var(--accent)"] : score >= 50 ? ["Perlu latihan", "var(--warn)"] : ["Ulang asas", "var(--bad)"];
+  g.textContent = txt; g.style.background = col; g.style.color = "#08161a";
+  $("r-meta").textContent = `${s.n} kompresi · ${Math.round(s.duration)} s · ${s.cycles.length} kitaran`;
+  const row = (name, val, pct) => `<tr><td>${name}</td><td>${val}</td><td>${pct == null ? "–" : `<span class="pill ${pct >= 70 ? "ok" : "warn"}">${pct}%</span>`}</td></tr>`;
+  $("r-table").innerHTML =
+    row("Kadar", `${s.rateAvg ?? "–"} /min`, s.rateOk) +
+    row("Kedalaman (anggaran)", `${s.depthAvg} cm`, s.depthOk) +
+    row("Recoil penuh", "", s.recoilOk) +
+    row("Siku lurus", "", s.elbowOk) +
+    row("Compression fraction", `${s.fraction}%`, null) +
+    row("Kompresi setiap kitaran", s.cycles.join(", "), null);
+  const rep = coachReport(s);
+  const li = (arr, empty) => (arr.length ? arr : [empty]).map(x => { const el = document.createElement("li"); el.textContent = x; return el; });
+  $("r-good").replaceChildren(...li(rep.good, "Teruskan berlatih; belum ada ukuran yang mencapai 70%."));
+  $("r-fix").replaceChildren(...li(rep.fix, "Tiada kelemahan utama dikesan. Kekalkan teknik ini."));
+  $("r-target").textContent = rep.target || "Kekalkan prestasi dalam sesi 2 minit berterusan.";
+  $("hist-card").hidden = !hist.length;
+  $("r-hist").innerHTML = hist.map(h => `<tr><td>${new Date(h.date).toLocaleString("ms-MY", { dateStyle: "short", timeStyle: "short" })}</td><td>${h.n}</td><td>${h.score ?? "–"}</td></tr>`).join("");
+  $("share-msg").textContent = "";
+  $("result").hidden = false; window.scrollTo(0, 0);
+}
+async function share() {
+  const s = lastSummary; if (!s) return;
+  const rep = coachReport(s);
+  const text = `Latihan CPR — skor ${Math.round(s.score ?? 0)}/100\n${s.n} kompresi, kadar purata ${s.rateAvg}/min, kedalaman ~${s.depthAvg} cm\n` +
+    `Kadar dalam julat ${s.rateOk ?? "–"}% · Kedalaman ${s.depthOk ?? "–"}% · Recoil ${s.recoilOk ?? "–"}% · Siku ${s.elbowOk ?? "–"}%\n` +
+    (rep.fix.length ? `Perbaiki: ${rep.fix.join(" ")}` : "");
+  try { if (navigator.share) { await navigator.share({ title: "Keputusan latihan CPR", text }); return; } } catch (e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(text); $("share-msg").textContent = "Keputusan disalin. Tampal dalam WhatsApp atau e-mel."; }
+  catch { $("share-msg").textContent = text; }
+}
+
+$("start").onclick = start;
+$("stop").onclick = stop;
+$("again").onclick = () => { $("result").hidden = true; $("setup").hidden = false; $("setup-msg").textContent = ""; };
+$("share").onclick = share;
+$("t-metro").onclick = (e) => { prefs.metro = !prefs.metro; e.currentTarget.setAttribute("aria-pressed", prefs.metro); };
+$("t-voice").onclick = (e) => { prefs.voice = !prefs.voice; e.currentTarget.setAttribute("aria-pressed", prefs.voice); if (!prefs.voice) speechSynthesis?.cancel(); };
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && running && !wakeLock) { try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {} }
+});
+
+// Simpan app & model untuk guna luar talian
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+// Mula muat model awal-awal di latar belakang supaya permulaan lebih cepat
+loadModel().catch(() => {});
+</script>
+</body>
+</html>
